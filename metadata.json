@@ -1,0 +1,6 @@
+{
+  "name": "REDEEMI",
+  "description": "REDEEMI | Digital Code Marketplace — Buy. Redeem. Enjoy. Premium digital redeem-code e-commerce app with Google Sign-In, instant code delivery, and admin controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

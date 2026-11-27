@@ -1,0 +1,394 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default-deny everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- GLOBAL HELPERS ---
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isBootstrapAdmin() {
+      return isSignedIn() &&
+             request.auth.token.email_verified == true &&
+             (request.auth.token.email == 'spfoundation59@gmail.com' ||
+              request.auth.token.email.lower() == 'spfoundation59@gmail.com');
+    }
+
+    function isAdmin() {
+      return isBootstrapAdmin() ||
+             (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    // --- ENTITY VALIDATION HELPERS ---
+
+    function isValidUser(data) {
+      return data.userId is string && isValidId(data.userId) &&
+             data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500)) &&
+             data.role in ['customer', 'admin'] &&
+             data.blocked is bool &&
+             data.totalOrders is int && data.totalOrders >= 0 && data.totalOrders <= 1000000 &&
+             data.totalSpentInr is int && data.totalSpentInr >= 0 && data.totalSpentInr <= 1000000000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidAdminEntry(data) {
+      return data.userId is string && isValidId(data.userId) &&
+             data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+             data.grantedBy is string && isValidId(data.grantedBy) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidPlatformConfig(data) {
+      return data.platformName is string && data.platformName.size() >= 1 && data.platformName.size() <= 40 &&
+             data.tagline is string && data.tagline.size() >= 1 && data.tagline.size() <= 100 &&
+             data.currency == 'INR' &&
+             data.platformFeePercent is int && data.platformFeePercent >= 0 && data.platformFeePercent <= 20 &&
+             data.gstPercent is int && data.gstPercent >= 0 && data.gstPercent <= 28 &&
+             data.maxCartQuantityPerItem is int && data.maxCartQuantityPerItem >= 1 && data.maxCartQuantityPerItem <= 20 &&
+             data.maintenanceMode is bool &&
+             data.announcementBanner is string && data.announcementBanner.size() <= 200 &&
+             data.enabledPaymentMethods is list &&
+             data.enabledPaymentMethods.size() >= 1 &&
+             data.enabledPaymentMethods.size() <= 4 &&
+             data.enabledPaymentMethods.hasOnly(['UPI', 'CARD', 'NETBANKING', 'WALLET']) &&
+             data.supportEmail is string && data.supportEmail.size() >= 3 && data.supportEmail.size() <= 120 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidProduct(data) {
+      return data.title is string && data.title.size() >= 2 && data.title.size() <= 80 &&
+             data.brand is string && data.brand.size() >= 2 && data.brand.size() <= 40 &&
+             data.category in ['Gaming', 'Streaming', 'Shopping', 'Gift Cards', 'Apps & Cloud'] &&
+             data.description is string && data.description.size() >= 5 && data.description.size() <= 600 &&
+             data.redemptionInstructions is string && data.redemptionInstructions.size() >= 5 && data.redemptionInstructions.size() <= 600 &&
+             data.priceInr is int && data.priceInr >= 1 && data.priceInr <= 1000000 &&
+             data.mrpInr is int && data.mrpInr >= data.priceInr && data.mrpInr <= 1000000 &&
+             data.stockCount is int && data.stockCount >= 0 && data.stockCount <= 1000000 &&
+             data.active is bool &&
+             data.featured is bool &&
+             data.accentStyle in ['purple', 'blue', 'gold', 'emerald'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCodeSlot(data) {
+      return data.productId is string && isValidId(data.productId) &&
+             data.status in ['available', 'sold'] &&
+             (!('claimedBy' in data) || (data.claimedBy is string && isValidId(data.claimedBy))) &&
+             (!('orderId' in data) || (data.orderId is string && isValidId(data.orderId))) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidRedeemCode(data) {
+      return data.productId is string && isValidId(data.productId) &&
+             data.productTitle is string && data.productTitle.size() >= 2 && data.productTitle.size() <= 80 &&
+             data.code is string && data.code.size() >= 4 && data.code.size() <= 120 &&
+             data.status in ['available', 'sold'] &&
+             (!('assignedToUserId' in data) || (data.assignedToUserId is string && isValidId(data.assignedToUserId))) &&
+             (!('orderId' in data) || (data.orderId is string && isValidId(data.orderId))) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCartItem(data) {
+      return data.productId is string && isValidId(data.productId) &&
+             data.quantity is int && data.quantity >= 1 && data.quantity <= 20 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidOrder(data) {
+      return data.userId is string && isValidId(data.userId) &&
+             data.customerEmail is string && data.customerEmail.size() >= 3 && data.customerEmail.size() <= 200 &&
+             data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 100 &&
+             data.status in ['paid', 'refunded'] &&
+             data.paymentMethod in ['UPI', 'CARD', 'NETBANKING', 'WALLET'] &&
+             data.paymentReference is string && data.paymentReference.size() >= 4 && data.paymentReference.size() <= 80 &&
+             data.subtotalInr is int && data.subtotalInr >= 1 && data.subtotalInr <= 100000000 &&
+             data.platformFeeInr is int && data.platformFeeInr >= 0 && data.platformFeeInr <= 50000000 &&
+             data.totalInr is int && data.totalInr == data.subtotalInr + data.platformFeeInr &&
+             data.itemCount is int && data.itemCount >= 1 && data.itemCount <= 100 &&
+             data.productSummary is string && data.productSummary.size() >= 1 && data.productSummary.size() <= 200 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidOrderItem(data) {
+      return data.userId is string && isValidId(data.userId) &&
+             data.orderId is string && isValidId(data.orderId) &&
+             data.productId is string && isValidId(data.productId) &&
+             data.productTitle is string && data.productTitle.size() >= 2 && data.productTitle.size() <= 80 &&
+             data.brand is string && data.brand.size() >= 2 && data.brand.size() <= 40 &&
+             data.quantity is int && data.quantity >= 1 && data.quantity <= 20 &&
+             data.unitPriceInr is int && data.unitPriceInr >= 1 && data.unitPriceInr <= 1000000 &&
+             data.lineTotalInr is int && data.lineTotalInr == data.unitPriceInr * data.quantity &&
+             data.slotIds is list && data.slotIds.size() == data.quantity && data.slotIds.size() <= 20 &&
+             data.slotIds[0] is string &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // --- COLLECTION RULES ---
+
+    // 1. Users & Cart Subcollection
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'email', 'displayName', 'role', 'blocked', 'totalOrders', 'totalSpentInr', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'email', 'displayName', 'photoUrl', 'role', 'blocked', 'totalOrders', 'totalSpentInr', 'createdAt', 'updatedAt']) &&
+                       isValidUser(incoming()) &&
+                       (incoming().role == 'customer' || (isBootstrapAdmin() && incoming().role == 'admin')) &&
+                       incoming().blocked == false &&
+                       incoming().totalOrders == 0 &&
+                       incoming().totalSpentInr == 0;
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidUser(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         isAdmin() ||
+                         (
+                           request.auth.uid == userId &&
+                           incoming().role == existing().role &&
+                           incoming().blocked == existing().blocked &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoUrl', 'email', 'updatedAt'])
+                         ) ||
+                         (
+                           request.auth.uid == userId &&
+                           incoming().role == existing().role &&
+                           incoming().blocked == existing().blocked &&
+                           incoming().totalOrders == existing().totalOrders + 1 &&
+                           incoming().totalSpentInr > existing().totalSpentInr &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['totalOrders', 'totalSpentInr', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if false;
+
+      match /cart/{productId} {
+        allow get: if isSignedIn() && isValidId(productId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(productId) &&
+                         request.auth.uid == userId &&
+                         incoming().productId == productId &&
+                         incoming().keys().hasAll(['productId', 'quantity', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['productId', 'quantity', 'createdAt', 'updatedAt']) &&
+                         isValidCartItem(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(productId) &&
+                         request.auth.uid == userId &&
+                         incoming().productId == existing().productId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidCartItem(incoming()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['quantity', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(productId) && request.auth.uid == userId;
+      }
+    }
+
+    // 2. Admins RBAC Registry
+    match /admins/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() &&
+                               isValidId(userId) &&
+                               incoming().userId == userId &&
+                               incoming().keys().hasAll(['userId', 'email', 'grantedBy', 'createdAt']) &&
+                               incoming().keys().hasOnly(['userId', 'email', 'grantedBy', 'createdAt']) &&
+                               isValidAdminEntry(incoming());
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    // 3. Platform Configuration (Owner-only write, public read for guest & customer storefront)
+    match /platformConfig/{configId} {
+      allow get: if isValidId(configId);
+      allow list: if true;
+      allow create: if isAdmin() &&
+                       isValidId(configId) &&
+                       incoming().keys().hasAll(['platformName', 'tagline', 'currency', 'platformFeePercent', 'gstPercent', 'maxCartQuantityPerItem', 'maintenanceMode', 'announcementBanner', 'enabledPaymentMethods', 'supportEmail', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['platformName', 'tagline', 'currency', 'platformFeePercent', 'gstPercent', 'maxCartQuantityPerItem', 'maintenanceMode', 'announcementBanner', 'enabledPaymentMethods', 'supportEmail', 'updatedAt']) &&
+                       isValidPlatformConfig(incoming());
+      allow update: if isAdmin() &&
+                       isValidId(configId) &&
+                       incoming().keys().hasOnly(['platformName', 'tagline', 'currency', 'platformFeePercent', 'gstPercent', 'maxCartQuantityPerItem', 'maintenanceMode', 'announcementBanner', 'enabledPaymentMethods', 'supportEmail', 'updatedAt']) &&
+                       isValidPlatformConfig(incoming());
+      allow delete: if false;
+    }
+
+    // 4. Digital Products (Owner-controlled pricing & inventory, public read for guest storefront)
+    match /products/{productId} {
+      allow get: if isValidId(productId);
+      allow list: if true;
+
+      allow create: if isAdmin() &&
+                       isValidId(productId) &&
+                       incoming().keys().hasAll(['title', 'brand', 'category', 'description', 'redemptionInstructions', 'priceInr', 'mrpInr', 'stockCount', 'active', 'featured', 'accentStyle', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['title', 'brand', 'category', 'description', 'redemptionInstructions', 'priceInr', 'mrpInr', 'stockCount', 'active', 'featured', 'accentStyle', 'createdAt', 'updatedAt']) &&
+                       isValidProduct(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(productId) &&
+                       isValidProduct(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         isAdmin() ||
+                         (
+                           existing().active == true &&
+                           incoming().priceInr == existing().priceInr &&
+                           incoming().mrpInr == existing().mrpInr &&
+                           incoming().title == existing().title &&
+                           incoming().brand == existing().brand &&
+                           incoming().category == existing().category &&
+                           incoming().description == existing().description &&
+                           incoming().redemptionInstructions == existing().redemptionInstructions &&
+                           incoming().active == existing().active &&
+                           incoming().featured == existing().featured &&
+                           incoming().accentStyle == existing().accentStyle &&
+                           incoming().stockCount >= 0 &&
+                           incoming().stockCount < existing().stockCount &&
+                           (existing().stockCount - incoming().stockCount) <= 20 &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['stockCount', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if isAdmin() && isValidId(productId);
+    }
+
+    // 5. Non-Secret Code Availability Slots (no secret code strings stored here)
+    match /codeSlots/{slotId} {
+      allow get: if isSignedIn() && isValidId(slotId);
+      allow list: if isSignedIn();
+
+      allow create: if isAdmin() &&
+                       isValidId(slotId) &&
+                       incoming().keys().hasAll(['productId', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['productId', 'status', 'createdAt', 'updatedAt']) &&
+                       isValidCodeSlot(incoming()) &&
+                       incoming().status == 'available' &&
+                       exists(/databases/$(database)/documents/products/$(incoming().productId));
+
+      allow update: if isSignedIn() &&
+                       isValidId(slotId) &&
+                       isValidCodeSlot(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().productId == existing().productId &&
+                       (
+                         isAdmin() ||
+                         (
+                           existing().status == 'available' &&
+                           incoming().status == 'sold' &&
+                           incoming().claimedBy == request.auth.uid &&
+                           incoming().orderId is string && isValidId(incoming().orderId) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'claimedBy', 'orderId', 'updatedAt']) &&
+                           getAfter(/databases/$(database)/documents/orders/$(incoming().orderId)).data.userId == request.auth.uid &&
+                           getAfter(/databases/$(database)/documents/orders/$(incoming().orderId)).data.status == 'paid'
+                         )
+                       );
+
+      allow delete: if isAdmin() && isValidId(slotId);
+    }
+
+    // 6. Secret Redeem Codes (NEVER readable by customers while unsold!)
+    match /redeemCodes/{slotId} {
+      allow get: if isValidId(slotId) && (isAdmin() || (isSignedIn() && resource.data.assignedToUserId == request.auth.uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.assignedToUserId == request.auth.uid);
+
+      allow create: if isAdmin() &&
+                       isValidId(slotId) &&
+                       incoming().keys().hasAll(['productId', 'productTitle', 'code', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['productId', 'productTitle', 'code', 'status', 'createdAt', 'updatedAt']) &&
+                       isValidRedeemCode(incoming()) &&
+                       incoming().status == 'available' &&
+                       exists(/databases/$(database)/documents/products/$(incoming().productId));
+
+      allow update: if isSignedIn() &&
+                       isValidId(slotId) &&
+                       isValidRedeemCode(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().productId == existing().productId &&
+                       incoming().productTitle == existing().productTitle &&
+                       (
+                         isAdmin() ||
+                         (
+                           existing().status == 'available' &&
+                           incoming().status == 'sold' &&
+                           incoming().code == existing().code &&
+                           incoming().assignedToUserId == request.auth.uid &&
+                           incoming().orderId is string && isValidId(incoming().orderId) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'assignedToUserId', 'orderId', 'updatedAt']) &&
+                           getAfter(/databases/$(database)/documents/orders/$(incoming().orderId)).data.userId == request.auth.uid &&
+                           getAfter(/databases/$(database)/documents/orders/$(incoming().orderId)).data.status == 'paid' &&
+                           slotId in getAfter(/databases/$(database)/documents/orders/$(incoming().orderId)/items/$(incoming().productId)).data.slotIds &&
+                           getAfter(/databases/$(database)/documents/codeSlots/$(slotId)).data.claimedBy == request.auth.uid &&
+                           getAfter(/databases/$(database)/documents/codeSlots/$(slotId)).data.orderId == incoming().orderId
+                         )
+                       );
+
+      allow delete: if isAdmin() && isValidId(slotId);
+    }
+
+    // 7. Customer Orders & Line Items
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && (isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid));
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(orderId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().status == 'paid' &&
+                       incoming().keys().hasAll(['userId', 'customerEmail', 'customerName', 'status', 'paymentMethod', 'paymentReference', 'subtotalInr', 'platformFeeInr', 'totalInr', 'itemCount', 'productSummary', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'customerEmail', 'customerName', 'status', 'paymentMethod', 'paymentReference', 'subtotalInr', 'platformFeeInr', 'totalInr', 'itemCount', 'productSummary', 'createdAt', 'updatedAt']) &&
+                       isValidOrder(incoming());
+
+      allow update: if isAdmin() &&
+                       isValidId(orderId) &&
+                       isValidOrder(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+
+      allow delete: if false;
+
+      match /items/{productId} {
+        allow get: if isValidId(productId) && (isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid));
+        allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+        allow create: if isSignedIn() &&
+                         isValidId(productId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().orderId == orderId &&
+                         incoming().productId == productId &&
+                         incoming().keys().hasAll(['userId', 'orderId', 'productId', 'productTitle', 'brand', 'quantity', 'unitPriceInr', 'lineTotalInr', 'slotIds', 'createdAt']) &&
+                         incoming().keys().hasOnly(['userId', 'orderId', 'productId', 'productTitle', 'brand', 'quantity', 'unitPriceInr', 'lineTotalInr', 'slotIds', 'createdAt']) &&
+                         isValidOrderItem(incoming()) &&
+                         getAfter(/databases/$(database)/documents/orders/$(orderId)).data.userId == request.auth.uid &&
+                         getAfter(/databases/$(database)/documents/orders/$(orderId)).data.subtotalInr >= incoming().lineTotalInr &&
+                         incoming().unitPriceInr == get(/databases/$(database)/documents/products/$(productId)).data.priceInr;
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}

@@ -1,0 +1,244 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "REDEEMI user account profile, role, and aggregate purchase stats.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "photoUrl": { "type": "string", "description": "Optional profile avatar URL" },
+        "role": { "type": "string", "enum": ["customer", "admin"] },
+        "blocked": { "type": "boolean", "description": "Whether account is suspended by admin" },
+        "totalOrders": { "type": "integer", "description": "Completed order count" },
+        "totalSpentInr": { "type": "integer", "description": "Lifetime spend in INR" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["userId", "email", "displayName", "role", "blocked", "totalOrders", "totalSpentInr", "createdAt", "updatedAt"]
+    },
+    "AdminEntry": {
+      "title": "AdminEntry",
+      "description": "Authoritative admin role grant record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "grantedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "grantedBy", "createdAt"]
+    },
+    "PlatformConfig": {
+      "title": "PlatformConfig",
+      "description": "Admin-controlled platform rules, fee percentages, and payment gateway methods.",
+      "type": "object",
+      "properties": {
+        "platformName": { "type": "string" },
+        "tagline": { "type": "string" },
+        "currency": { "type": "string" },
+        "platformFeePercent": { "type": "integer" },
+        "gstPercent": { "type": "integer" },
+        "maxCartQuantityPerItem": { "type": "integer" },
+        "maintenanceMode": { "type": "boolean" },
+        "announcementBanner": { "type": "string" },
+        "enabledPaymentMethods": { "type": "array" },
+        "supportEmail": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "platformName",
+        "tagline",
+        "currency",
+        "platformFeePercent",
+        "gstPercent",
+        "maxCartQuantityPerItem",
+        "maintenanceMode",
+        "announcementBanner",
+        "enabledPaymentMethods",
+        "supportEmail",
+        "updatedAt"
+      ]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Digital redeem-code or voucher product with admin-controlled INR pricing.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "brand": { "type": "string" },
+        "category": { "type": "string", "enum": ["Gaming", "Streaming", "Shopping", "Gift Cards", "Apps & Cloud"] },
+        "description": { "type": "string" },
+        "redemptionInstructions": { "type": "string" },
+        "priceInr": { "type": "integer" },
+        "mrpInr": { "type": "integer" },
+        "stockCount": { "type": "integer" },
+        "active": { "type": "boolean" },
+        "featured": { "type": "boolean" },
+        "accentStyle": { "type": "string", "enum": ["purple", "blue", "gold", "emerald"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "title",
+        "brand",
+        "category",
+        "description",
+        "redemptionInstructions",
+        "priceInr",
+        "mrpInr",
+        "stockCount",
+        "active",
+        "featured",
+        "accentStyle",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CodeSlot": {
+      "title": "CodeSlot",
+      "description": "Non-secret inventory availability slot paired 1:1 with a RedeemCode document.",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string" },
+        "status": { "type": "string", "enum": ["available", "sold"] },
+        "claimedBy": { "type": "string" },
+        "orderId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "status", "createdAt", "updatedAt"]
+    },
+    "RedeemCode": {
+      "title": "RedeemCode",
+      "description": "Protected digital redeem code only readable by admins or the assigned buyer.",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string" },
+        "productTitle": { "type": "string" },
+        "code": { "type": "string" },
+        "status": { "type": "string", "enum": ["available", "sold"] },
+        "assignedToUserId": { "type": "string" },
+        "orderId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "productTitle", "code", "status", "createdAt", "updatedAt"]
+    },
+    "CartItem": {
+      "title": "CartItem",
+      "description": "Customer cart entry referencing productId and quantity only (prices read from products).",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "quantity", "createdAt", "updatedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Completed customer purchase receipt in INR.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "customerName": { "type": "string" },
+        "status": { "type": "string", "enum": ["paid", "refunded"] },
+        "paymentMethod": { "type": "string", "enum": ["UPI", "CARD", "NETBANKING", "WALLET"] },
+        "paymentReference": { "type": "string" },
+        "subtotalInr": { "type": "integer" },
+        "platformFeeInr": { "type": "integer" },
+        "totalInr": { "type": "integer" },
+        "itemCount": { "type": "integer" },
+        "productSummary": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "customerEmail",
+        "customerName",
+        "status",
+        "paymentMethod",
+        "paymentReference",
+        "subtotalInr",
+        "platformFeeInr",
+        "totalInr",
+        "itemCount",
+        "productSummary",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "OrderItem": {
+      "title": "OrderItem",
+      "description": "Authoritative line item inside an order verifying admin price and claimed code slots.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "orderId": { "type": "string" },
+        "productId": { "type": "string" },
+        "productTitle": { "type": "string" },
+        "brand": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "unitPriceInr": { "type": "integer" },
+        "lineTotalInr": { "type": "integer" },
+        "slotIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "orderId",
+        "productId",
+        "productTitle",
+        "brand",
+        "quantity",
+        "unitPriceInr",
+        "lineTotalInr",
+        "slotIds",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile documents isolated per user or readable by admin."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminEntry" },
+      "description": "Admin RBAC grant documents."
+    },
+    "/platformConfig/{configId}": {
+      "schema": { "$ref": "#/entities/PlatformConfig" },
+      "description": "Platform rules and payment gateway configuration."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Digital redeem-code products with admin-controlled INR prices."
+    },
+    "/codeSlots/{slotId}": {
+      "schema": { "$ref": "#/entities/CodeSlot" },
+      "description": "Non-secret inventory availability slots paired with redeemCodes."
+    },
+    "/redeemCodes/{slotId}": {
+      "schema": { "$ref": "#/entities/RedeemCode" },
+      "description": "Secret redeem codes readable only by admin or assigned buyer."
+    },
+    "/users/{userId}/cart/{productId}": {
+      "schema": { "$ref": "#/entities/CartItem" },
+      "description": "User shopping cart items."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Customer purchase orders."
+    },
+    "/orders/{orderId}/items/{productId}": {
+      "schema": { "$ref": "#/entities/OrderItem" },
+      "description": "Line items under a customer purchase order."
+    }
+  }
+}
